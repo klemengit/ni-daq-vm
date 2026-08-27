@@ -8,3 +8,5 @@ cloud-init/user-data.yaml
 .venv/
 __pycache__/
 *.pyc
+# Written by client/ldaq_demo.py
+ldaq_demo.png
