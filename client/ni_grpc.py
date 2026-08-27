@@ -87,6 +87,9 @@ def _patch_acquire_for_grpc() -> None:
     and leaves every other error alone.
 
     Costs nothing on the common path: no extra RPC, just an except clause.
+
+    Upstream fix: https://github.com/ladisk/nidaqwrapper/pull/9 -- once that
+    ships in a release, delete this function and its call site.
     """
     from nidaqwrapper.ai_task import AITask
 
@@ -100,7 +103,9 @@ def _patch_acquire_for_grpc() -> None:
             return original(self, n_samples)
         except DaqError as exc:
             if n_samples is None and exc.error_code == -52005:
-                return np.empty((0, len(self.task.ai_channels)))
+                # Mirror exactly what a local driver returns for an empty
+                # buffer: np.array([]) reshaped to (0, 1).
+                return np.empty((0, 1))
             raise
 
     acquire._grpc_patched = True
