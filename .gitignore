@@ -1,0 +1,10 @@
+# Ubuntu cloud image (600 MB, fetched by setup.sh)
+*.img
+# Generated from the template at setup time; contains your public key
+cloud-init/user-data.yaml
+# Randomly generated per install
+.console-password
+# Client virtualenv
+.venv/
+__pycache__/
+*.pyc

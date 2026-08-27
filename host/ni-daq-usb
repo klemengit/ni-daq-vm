@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Keep the NI chassis attached to the ni-daq VM across re-enumeration.
+#
+# The cDAQ-9174 boots as USB 3923:74a5, and once the NI driver in the guest
+# loads its firmware it resets and comes back as 3923:735b with a new device
+# number. A <hostdev> pinned to one product id therefore loses the device at
+# exactly the moment things start working. This script is driven by udev on
+# every NI USB add/remove, and always reconciles the domain to whatever NI
+# device is physically present right now.
+#
+# Usage: ni-daq-usb attach|detach
+set -uo pipefail
+
+VM=ni-daq
+NI_VENDOR=3923
+VIRSH="virsh -c qemu:///system"
+LOG=/var/log/ni-daq-usb.log
+
+exec >>"$LOG" 2>&1
+# udev can fire several times for one physical event; serialise so two runs
+# cannot detach each other's work.
+exec 9>/run/ni-daq-usb.lock
+flock 9
+
+echo "--- $(date -Is) $* ---"
+
+[ "$($VIRSH domstate "$VM" 2>/dev/null)" = "running" ] || {
+    echo "domain not running, nothing to do"; exit 0; }
+
+# Let the device settle: it may still be re-enumerating.
+sleep 1
+
+# What NI device is on the host right now?
+CURRENT_PID=""
+for d in /sys/bus/usb/devices/*/; do
+    v=$(cat "$d/idVendor" 2>/dev/null) || continue
+    [ "$v" = "$NI_VENDOR" ] || continue
+    CURRENT_PID=$(cat "$d/idProduct" 2>/dev/null)
+    echo "host has ${v}:${CURRENT_PID} at $(basename "$d")"
+    break
+done
+
+# Which NI hostdevs does the domain currently claim?
+mapfile -t ATTACHED < <($VIRSH dumpxml "$VM" 2>/dev/null | python3 -c "
+import sys, xml.etree.ElementTree as ET
+root = ET.fromstring(sys.stdin.read())
+for hd in root.iter('hostdev'):
+    src = hd.find('source')
+    if src is None: continue
+    ven, pro = src.find('vendor'), src.find('product')
+    if ven is None or pro is None: continue
+    if ven.get('id','').lower() in ('0x$NI_VENDOR', '$NI_VENDOR'):
+        print(pro.get('id','').lower().replace('0x',''))
+")
+
+detach() {
+    local pid=$1
+    echo "detaching 0x${pid}"
+    $VIRSH detach-device "$VM" /dev/stdin --live <<EOF
+<hostdev mode='subsystem' type='usb' managed='yes'>
+  <source><vendor id='0x${NI_VENDOR}'/><product id='0x${pid}'/></source>
+</hostdev>
+EOF
+}
+
+attach() {
+    local pid=$1
+    echo "attaching 0x${pid}"
+    $VIRSH attach-device "$VM" /dev/stdin --live <<EOF
+<hostdev mode='subsystem' type='usb' managed='yes'>
+  <source><vendor id='0x${NI_VENDOR}'/><product id='0x${pid}'/></source>
+</hostdev>
+EOF
+}
+
+# Drop EVERY claimed NI hostdev, including one whose product id matches.
+# libvirt keeps the hostdev in the live XML after the device re-enumerates out
+# from under QEMU, so "already attached" can be a stale claim with nothing
+# behind it -- and that stale claim blocks the re-attach. Always reconcile from
+# scratch instead of trusting it.
+for pid in "${ATTACHED[@]}"; do
+    [ -n "$pid" ] || continue
+    detach "$pid"
+done
+
+if [ -n "$CURRENT_PID" ]; then
+    attach "$CURRENT_PID"
+else
+    echo "no NI device on the host"
+fi

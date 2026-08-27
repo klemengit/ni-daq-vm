@@ -1,0 +1,8 @@
+# Keep the NI cDAQ chassis attached to the ni-daq VM across re-enumeration.
+# The chassis changes product id (74a5 -> 735b) when its firmware loads, so we
+# react to any National Instruments (0x3923) device rather than a fixed id.
+# systemd-run --no-block keeps udev from killing the slow virsh call.
+ACTION=="add",    SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="3923", \
+    RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/ni-daq-usb attach"
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{PRODUCT}=="3923/*", \
+    RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/ni-daq-usb detach"

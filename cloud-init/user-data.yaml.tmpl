@@ -1,0 +1,30 @@
+#cloud-config
+hostname: ni-daq
+fqdn: ni-daq.local
+manage_etc_hosts: true
+
+users:
+  - name: klemen
+    groups: [sudo, adm]
+    shell: /bin/bash
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    lock_passwd: false
+    passwd: '$6$clkTcuA3W6QxTm1y$j0eMWBRCMq8rjsROX780z32.MH.VFIp.z/G.ZI1BcOU9wFieieGa6EyBhAzpGpq8KI12C/9eJmQ3abGcQ/hae1'
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+
+ssh_pwauth: false          # password is for the serial console only, not for ssh
+package_update: false
+package_upgrade: false     # the kernel must never move on its own
+
+write_files:
+  - path: /etc/apt/apt.conf.d/99-ni-no-auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "0";
+      APT::Periodic::Unattended-Upgrade "0";
+
+runcmd:
+  - systemctl disable --now unattended-upgrades.service || true
+  - systemctl disable --now apt-daily.timer apt-daily-upgrade.timer || true
+
+final_message: "ni-daq ready after $UPTIME seconds"
