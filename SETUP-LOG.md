@@ -825,3 +825,40 @@ acq = LDAQ.national_instruments.NIAcquisition(ai, acquisition_name="rig")
 ```
 
 If anything gets wedged after a crashed script: `ni_grpc.restart_server()`.
+
+## Step 13 — the upstream fix, merged
+
+[ladisk/nidaqwrapper#9](https://github.com/ladisk/nidaqwrapper/pull/9) merged
+2026-08-27 (`6c986cc`). Branch deleted.
+
+The fix that landed is **smaller** than the one first drafted here. The original
+returned `np.empty((0, n_channels))`, but `nidaqwrapper`'s existing local
+empty-buffer path returns `(0, 1)` regardless of channel count. Introducing a
+second, inconsistent empty shape would have been a new bug, so the merged version
+normalises the error back to the empty list a local driver returns and falls
+through the existing reshape — both transports now produce identical output.
+Confirmed LDAQ handles `(0, 1)` before changing it.
+
+Scope kept narrow: only `n_samples is None`, only `-52005`. Three mocked
+regression tests (919 total), verified meaningful by reverting the source change
+and watching `test_empty_buffer_over_grpc` fail.
+
+### The workaround stays for now, but disables itself
+
+Merged to `main` is not the same as released: `pyproject.toml` still says 0.2.0,
+PyPI is still 0.2.0, and there are no tags. `client/requirements.txt` installs
+from PyPI, so the running client still has the unfixed code.
+
+Rather than leave a note to delete something later,
+`_patch_acquire_for_grpc()` now inspects the installed `AITask.acquire` source
+for `-52005` and does nothing when the fix is present. Source inspection rather
+than a version comparison, so it stays correct whatever the release is numbered
+and works for a git install too. Verified both ways:
+
+| Installed nidaqwrapper | Patch applied? |
+|---|---|
+| 0.2.0 from PyPI (no fix) | yes |
+| merged `main` (fix present) | no — self-disabled |
+
+So the only remaining action is to **cut a nidaqwrapper release** and
+`uv pip install -U nidaqwrapper`. Nothing in this repo needs changing.

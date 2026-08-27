@@ -111,7 +111,7 @@ is fine and only the hardware is absent.
 **`read(-1)` differs over gRPC.** READ_ALL_AVAILABLE on an empty buffer returns
 an empty array locally but raises `DaqError -52005` over gRPC, about once every
 sixty reads in an acquisition loop. `ni_grpc` patches `AITask.acquire` at runtime;
-the fix is upstream in [ladisk/nidaqwrapper#9](https://github.com/ladisk/nidaqwrapper/pull/9), mirrored in `patches/`.
+fixed upstream in [ladisk/nidaqwrapper#9](https://github.com/ladisk/nidaqwrapper/pull/9) (merged, not yet released). `ni_grpc` patches `AITask.acquire` at runtime and self-disables once the fix is installed.
 
 ## Performance
 

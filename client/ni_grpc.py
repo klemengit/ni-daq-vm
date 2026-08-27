@@ -88,13 +88,26 @@ def _patch_acquire_for_grpc() -> None:
 
     Costs nothing on the common path: no extra RPC, just an except clause.
 
-    Upstream fix: https://github.com/ladisk/nidaqwrapper/pull/9 -- once that
-    ships in a release, delete this function and its call site.
+    Upstream fix: https://github.com/ladisk/nidaqwrapper/pull/9, merged to main
+    2026-08-27 but not yet in a release (PyPI is still 0.2.0). This function
+    detects the fix and does nothing once it is installed, so upgrading
+    nidaqwrapper is all that is needed -- no code change here.
     """
+    import inspect
+
     from nidaqwrapper.ai_task import AITask
 
     if getattr(AITask.acquire, "_grpc_patched", False):
         return
+
+    # Self-disable once the installed nidaqwrapper carries the upstream fix.
+    # Checking the source beats checking a version number: it stays correct
+    # whatever the release is called, and works for a git install too.
+    try:
+        if "-52005" in inspect.getsource(AITask.acquire):
+            return
+    except (OSError, TypeError):
+        pass  # no source available (zipimport, compiled): patching is harmless
 
     original = AITask.acquire
 
