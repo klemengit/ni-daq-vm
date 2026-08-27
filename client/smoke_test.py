@@ -39,8 +39,8 @@ def main() -> None:
 
     opts = opts_for("")
 
+    system = nidaqmx.system.System.remote(opts)
     try:
-        system = nidaqmx.system.System.remote(opts)
         print(f"  driver    : NI-DAQmx {system.driver_version}")
         names = list(system.devices.device_names)
         print(f"  devices   : {names or 'none attached'}")
@@ -49,12 +49,24 @@ def main() -> None:
     except Exception as exc:
         print(f"  driver    : {type(exc).__name__}: {exc}")
 
-    print("\ntask creation (expect -200220 with no hardware):")
+    # Pick a real AI channel when hardware is present; fall back to a name that
+    # cannot exist, so the no-hardware case still produces the -200220 signal.
+    chan = "Dev1/ai0"
+    try:
+        for name in system.devices.device_names:
+            ai = list(system.devices[name].ai_physical_chans.channel_names)
+            if ai:
+                chan = ai[0]
+                break
+    except Exception:
+        pass
+
+    print(f"\ntask creation on {chan} (expect -200220 if no hardware):")
     try:
         with nidaqmx.Task(new_task_name="smoke_task",
                           grpc_options=opts_for("smoke_task")) as task:
-            task.ai_channels.add_ai_voltage_chan("Dev1/ai0")
-            print("  channel added - real hardware is present")
+            task.ai_channels.add_ai_voltage_chan(chan)
+            print(f"  channel added on {chan} - hardware is live")
     except DaqError as exc:
         verdict = "chain OK, no hardware" if exc.error_code == -200220 else "see error"
         print(f"  DaqError {exc.error_code} ({verdict})")
