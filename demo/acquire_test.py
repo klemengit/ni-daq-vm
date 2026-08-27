@@ -1,7 +1,9 @@
 """Acquire real samples from the NI 9232 over gRPC, from Omarchy."""
 
-import sys, time
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+import pathlib
+import sys
+import time
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "client"))
 
 import numpy as np
 import ni_grpc

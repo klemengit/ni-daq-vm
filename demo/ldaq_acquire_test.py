@@ -1,7 +1,8 @@
 """Acquire through LDAQ over gRPC, from Omarchy. The real end-to-end test."""
 
+import pathlib
 import sys
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "client"))
 
 import numpy as np
 import LDAQ

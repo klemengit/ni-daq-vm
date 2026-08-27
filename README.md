@@ -63,6 +63,18 @@ with remote_task("quick") as task:
 
 `ni_grpc.restart_server()` clears orphaned sessions after a crashed script.
 
+### See it work
+
+```bash
+.venv/bin/python demo/ldaq_demo.py               # live plot, 10 s, 2 channels
+.venv/bin/python demo/ldaq_demo.py --no-vis      # headless, stats only
+```
+
+Opens LDAQ's own plot window -- live time trace over a live spectrum -- fed
+from the chassis through the VM. Touch an input's centre pin and you will see
+it. It prints the sample count at the end and exits non-zero if the record is
+short, so it doubles as a smoke test after a reboot or a replug.
+
 ## Layout
 
 | Path | What |
@@ -71,7 +83,8 @@ with remote_task("quick") as task:
 | `host/` | Arch-side: libvirt, VM creation, ufw, USB udev rule |
 | `guest/` | Ubuntu-side: kernel pin, NI-DAQmx, gRPC server |
 | `cloud-init/` | first-boot identity and network config |
-| `client/` | `ni_grpc.py` helpers and the verification scripts |
+| `client/` | `ni_grpc.py`, the client-side API, and the smoke test `setup.sh` runs |
+| `demo/` | runnable end-to-end demos, including the live-plot one |
 | `patches/` | upstream fix for `nidaqwrapper` |
 | `SETUP-LOG.md` | full build log, including the dead ends |
 

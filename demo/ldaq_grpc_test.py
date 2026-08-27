@@ -5,9 +5,10 @@ What we can prove is that every LDAQ/nidaqwrapper code path that matters runs
 against a *remote* task and never reaches for a local driver.
 """
 
+import pathlib
 import sys
 
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "client"))
 
 import nidaqmx
 from nidaqmx.errors import DaqError
