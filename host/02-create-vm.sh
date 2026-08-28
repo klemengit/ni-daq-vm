@@ -5,6 +5,9 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VM=ni-daq
+# The account created inside the guest. Defaults to your host username so a
+# fresh clone needs no editing; override with GUEST_USER=... if you prefer.
+GUEST_USER="${GUEST_USER:-$USER}"
 MAC=52:54:00:4e:49:01          # 4e:49 = "NI"
 IP=192.168.122.50
 RAM=3072
@@ -28,7 +31,9 @@ fi
 echo "==> Rendering cloud-init user-data"
 USERDATA="$HERE/cloud-init/user-data.yaml"
 NETCONF="$HERE/cloud-init/network-config.yaml"
-sed "s|__SSH_PUBKEY__|$(cat "$PUBKEY")|" "$HERE/cloud-init/user-data.yaml.tmpl" > "$USERDATA"
+sed -e "s|__SSH_PUBKEY__|$(cat "$PUBKEY")|" \
+    -e "s|__GUEST_USER__|$GUEST_USER|" \
+    "$HERE/cloud-init/user-data.yaml.tmpl" > "$USERDATA"
 
 echo "==> Preparing disk ($DISK_GB G)"
 sudo install -d -m 0711 /var/lib/libvirt/images
@@ -66,7 +71,7 @@ echo "==> Waiting for SSH on $IP (cloud-init takes ~60-90 s on first boot)"
 for i in $(seq 1 60); do
     if ssh -i "$HOME/.ssh/ni_daq_vm" -o StrictHostKeyChecking=no \
            -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3 \
-           klemen@"$IP" true 2>/dev/null; then
+           "$GUEST_USER@$IP" true 2>/dev/null; then
         echo "    SSH is up."
         break
     fi
@@ -76,13 +81,13 @@ echo
 
 echo "==> Guest info"
 ssh -i "$HOME/.ssh/ni_daq_vm" -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null klemen@"$IP" \
+    -o UserKnownHostsFile=/dev/null "$GUEST_USER@$IP" \
     'echo "kernel: $(uname -r)"; echo "release: $(lsb_release -ds)"; free -m | head -2'
 
 cat <<EOM
 
 DONE.
   ssh ni-daq        (after step 3 adds the ssh config entry)
-  ssh -i ~/.ssh/ni_daq_vm klemen@$IP
+  ssh -i ~/.ssh/ni_daq_vm $GUEST_USER@$IP
   sudo virsh console $VM     # serial console, escape with Ctrl-]
 EOM

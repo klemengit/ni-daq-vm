@@ -8,6 +8,9 @@
 set -euo pipefail
 
 VM=ni-daq
+# The account created inside the guest. Defaults to your host username so a
+# fresh clone needs no editing; override with GUEST_USER=... if you prefer.
+GUEST_USER="${GUEST_USER:-$USER}"
 IP=192.168.122.50
 
 echo "==> ufw before"
@@ -41,7 +44,7 @@ echo "==> Reachability"
 if ping -c2 -W3 "$IP" >/dev/null 2>&1; then
     echo "    $IP responds to ping"
     ssh -i "$HOME/.ssh/ni_daq_vm" -o StrictHostKeyChecking=no \
-        -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 klemen@"$IP" \
+        -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$GUEST_USER@$IP" \
         'echo "    kernel: $(uname -r)"; echo "    release: $(lsb_release -ds)"; ip -brief addr' \
         || echo "    ping works but ssh does not -- check cloud-init inside the guest"
 else

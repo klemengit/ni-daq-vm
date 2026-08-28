@@ -96,7 +96,7 @@ Flagged here in case guest `apt` fails later.
 ## Step 0 — project scaffold
 
 ```
-~/Work/ni-daq-vm/
+ni-daq-vm/
 ├── SETUP-LOG.md      this file
 ├── host/             scripts that run on Arch
 └── provision/        cloud-init and guest-side scripts
@@ -816,7 +816,7 @@ common path.
 
 ```python
 import LDAQ
-import sys; sys.path.insert(0, "~/Work/ni-daq-vm/host")
+import sys; sys.path.insert(0, "host")   # or this repo's host/ by absolute path
 from ni_grpc import ldaq_ai_task
 
 ai = ldaq_ai_task("rig", sample_rate=25600,

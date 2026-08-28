@@ -21,12 +21,16 @@ IMG_URL=https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-serv
 KVER=6.14.0-37          # lowest kernel >= NI's 6.11 minimum for Ubuntu 24.04
 NI_RELEASE=2026Q3
 GRPC_VER=v2.19.0
+# The account created inside the guest. Defaults to your host username so a
+# fresh clone needs no editing; override with GUEST_USER=... if you prefer.
+GUEST_USER="${GUEST_USER:-$USER}"
+export GUEST_USER
 
 STAGES=(host-deps ufw image vm guest udev control client verify)
 
 say()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 ssh_vm() { ssh -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-               -o LogLevel=ERROR "klemen@$IP" "$@"; }
+               -o LogLevel=ERROR "$GUEST_USER@$IP" "$@"; }
 
 wait_for_ssh() {
     say "Waiting for SSH on $IP"
@@ -76,7 +80,7 @@ stage_vm() {
 
 Host $VM
     HostName $IP
-    User klemen
+    User $GUEST_USER
     IdentityFile $KEY
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
@@ -93,7 +97,7 @@ stage_guest() {
         echo "    already on ${KVER}-generic"
     else
         scp -q -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            guest/01-base.sh "klemen@$IP:/tmp/"
+            guest/01-base.sh "$GUEST_USER@$IP:/tmp/"
         ssh_vm "bash /tmp/01-base.sh $KVER" || true   # ends by rebooting
         wait_for_ssh
     fi
@@ -103,13 +107,13 @@ stage_guest() {
         echo "    ni-daqmx already installed"
     else
         scp -q -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            guest/02-nidaqmx.sh "klemen@$IP:/tmp/"
+            guest/02-nidaqmx.sh "$GUEST_USER@$IP:/tmp/"
         ssh_vm "bash /tmp/02-nidaqmx.sh $NI_RELEASE"
     fi
 
     say "Guest: NI gRPC device server $GRPC_VER"
     scp -q -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        guest/03-grpc-server.sh "klemen@$IP:/tmp/"
+        guest/03-grpc-server.sh "$GUEST_USER@$IP:/tmp/"
     ssh_vm "bash /tmp/03-grpc-server.sh $GRPC_VER"
 }
 

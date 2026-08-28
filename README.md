@@ -27,12 +27,15 @@ NI-9232, acquiring through LDAQ at 25.6 kHz.
 ## Install
 
 ```bash
-git clone <this repo> ~/Work/ni-daq-vm && cd ~/Work/ni-daq-vm
+git clone <this repo> && cd ni-daq-vm
 ./setup.sh
 ```
 
 Roughly 20-30 minutes, mostly downloads. Stages are idempotent and can be run
 individually — `./setup.sh --list`, then e.g. `./setup.sh guest verify`.
+
+The guest account is named after your host username; set `GUEST_USER=...` before
+`./setup.sh` if you want a different one.
 
 Requires: an Arch host with KVM, `uv`, and sudo.
 
@@ -54,7 +57,7 @@ into the guest.
 Then, from Python:
 
 ```python
-import sys; sys.path.insert(0, "~/Work/ni-daq-vm/client")
+import sys; sys.path.insert(0, "client")   # or this repo's client/ by absolute path
 import LDAQ
 from ni_grpc import ldaq_ai_task
 
