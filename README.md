@@ -103,7 +103,6 @@ short, so it doubles as a smoke test after a reboot or a replug.
 | `cloud-init/` | first-boot identity and network config |
 | `client/` | `ni_grpc.py`, the client-side API, and the smoke test `setup.sh` runs |
 | `demo/` | runnable end-to-end demos, including the live-plot one |
-| `patches/` | upstream fix for `nidaqwrapper` |
 | `SETUP-LOG.md` | full build log, including the dead ends |
 
 ## Things that will bite you

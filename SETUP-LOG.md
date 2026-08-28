@@ -793,10 +793,9 @@ after :  acquire() x120: OK=120 (empty=1)   errors=0
 Roughly one failure per 60 reads — an acquisition loop polls faster than the
 hardware fills the buffer, so this is not an edge case; it makes remote
 acquisition unusable. `ni_grpc._patch_acquire_for_grpc()` monkey-patches
-`AITask.acquire` at runtime so it works today. The proper fix for upstream is in
-`patches/nidaqwrapper-grpc-empty-read.patch` — a try/except around the one read,
-returning the empty array the caller already expects, with no extra RPC on the
-common path.
+`AITask.acquire` at runtime so it works today. The proper fix for upstream is a
+try/except around the one read, returning the empty array the caller already
+expects, with no extra RPC on the common path.
 
 ## Final state: fully working
 
