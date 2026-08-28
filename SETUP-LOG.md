@@ -970,3 +970,42 @@ waiting for it. A drop-in caps the wait:
 right up to the shutdown. `guest/02-nidaqmx.sh` now installs the drop-in, so a
 fresh build gets it. The 60 s fallback in `ni-daq down` stays as a safety net;
 it should no longer ever fire.
+
+---
+
+## Step 16 — the hostdev entries are load-bearing
+
+The two `<hostdev>` blocks in the domain XML, one per NI product id, looked
+like leftovers from the abandoned pin-the-product-id approach: both sat there
+marked `missing='yes'` while the chassis was plugged in and not attached. They
+were removed on that reading. That was wrong.
+
+`startupPolicy='optional'` means libvirt attaches whichever id is present **as
+the domain starts**. A plain `virsh start` with no privileges therefore brings
+the chassis up on its own:
+
+    no-sudo start -> devices: ['cDAQ1', 'cDAQ1Mod1', 'cDAQ1Mod2']
+
+The `missing='yes'` observation was the mid-session case: the domain was
+already running, and `startupPolicy` has nothing to say about a device that
+appears later. Both entries are restored.
+
+So `ni-daq up` now waits for the driver to actually report devices rather than
+reaching for `sudo` immediately, and only falls back to the privileged
+reconcile when libvirt did not manage the attach itself — a chassis plugged in
+mid-session, or a stale claim. A cold start needs no password:
+
+    starting ni-daq
+      waiting for the gRPC server on 192.168.122.50:31763.. ok (2s)
+      waiting for the driver to see the hardware ok (0s)
+    devices: ['cDAQ1', 'cDAQ1Mod1', 'cDAQ1Mod2']
+    real  0m16.639s
+
+`ni-daq log` also lost its `sudo`: /var/log/ni-daq-usb.log is 0644.
+
+For the mid-session case that does still need root, `host/sudoers-ni-daq.tmpl`
+grants NOPASSWD on exactly `ni-daq-usb attach` and `ni-daq-usb detach`, nothing
+else. `04-install-udev-rule.sh` runs it through `visudo -cqf` before installing
+and refuses to install anything that does not validate — a malformed file in
+/etc/sudoers.d locks you out of sudo entirely. It is optional; skip it and the
+only cost is a password prompt when you hot-plug the chassis.

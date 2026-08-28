@@ -18,3 +18,18 @@ sudo /usr/local/bin/ni-daq-usb attach
 
 echo "==> Log"
 sudo tail -20 /var/log/ni-daq-usb.log 2>/dev/null || echo "  (no log yet)"
+
+echo "==> Optional: passwordless 'ni-daq attach'"
+# A cold `ni-daq up` needs no privileges -- libvirt attaches the chassis from
+# the domain XML. This only removes the prompt when reconciling a chassis
+# plugged in mid-session. Validate before installing: a malformed file in
+# /etc/sudoers.d can lock you out of sudo entirely.
+TMP=$(mktemp)
+sed "s/__USER__/$USER/" "$HERE/sudoers-ni-daq.tmpl" > "$TMP"
+if sudo visudo -cqf "$TMP"; then
+    sudo install -m 0440 -o root -g root "$TMP" /etc/sudoers.d/ni-daq
+    echo "    installed /etc/sudoers.d/ni-daq for $USER"
+else
+    echo "    REFUSED: generated sudoers file did not validate, nothing installed"
+fi
+rm -f "$TMP"

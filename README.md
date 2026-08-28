@@ -112,6 +112,14 @@ and unattended-upgrades disabled. Verified: all 32 NI DKMS modules build against
 it with NI-DAQmx 2026 Q3, including `nipalk`, which fails on 6.14 with older
 releases.
 
+**The `<hostdev>` entries in the domain XML are load-bearing.** There is one
+per NI product id, each with `startupPolicy='optional'`, so libvirt attaches
+whatever is plugged in as the domain starts -- which is why a cold `ni-daq up`
+needs no privileges at all. They look like leftovers from the abandoned
+pin-the-product-id approach, and deleting them costs you the unprivileged
+attach. `startupPolicy` applies only at domain start, so a chassis plugged in
+mid-session still needs `ni-daq attach`.
+
 **`virsh autostart` alone does not survive a reboot.** Arch enables only
 `libvirtd.socket`, not `libvirtd.service`, so libvirt starts on the first
 connection rather than at boot -- and guest autostart is something the daemon

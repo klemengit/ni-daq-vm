@@ -90,6 +90,16 @@ warn_if_stale() {
     echo "        Re-install it with: ./setup.sh udev" >&2
 }
 
+devices_present() {
+    [ -x "$VENV" ] || return 1
+    "$VENV" - "$REPO" <<'PY' 2>/dev/null
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "client"))
+import ni_grpc
+sys.exit(0 if ni_grpc.devices() else 1)
+PY
+}
+
 cmd_up() {
     case "$(state)" in
         running) echo "already running" ;;
@@ -103,15 +113,27 @@ cmd_up() {
 
     # udev only fires on USB events, so a chassis that was already plugged in
     # when the VM started is not attached to anything yet. Reconcile now.
-    warn_if_stale
-    if chassis_on_host; then
-        echo "  attaching the NI chassis (needs sudo -- the reconcile script logs to /var/log)"
-        sudo /usr/local/bin/ni-daq-usb attach || echo "  attach reported a problem, see: ni-daq log"
-        sleep 2
-    else
+    if ! chassis_on_host; then
         echo "  no NI chassis on this machine's USB -- plug it in and run: ni-daq attach"
+        return 0
     fi
 
+    # The domain XML carries a <hostdev> per NI product id with
+    # startupPolicy='optional', so libvirt attaches whatever is plugged in as
+    # the domain starts -- no privileges needed. The guest driver then loads
+    # firmware, the chassis re-enumerates under its other id, and the udev
+    # rule re-attaches it. All of that takes a few seconds.
+    if wait_for 40 "the driver to see the hardware" devices_present; then
+        echo "devices: $(devices)"
+        return 0
+    fi
+
+    # Only if that did not happen -- a chassis plugged in mid-session, or a
+    # stale claim -- do we need the privileged reconcile.
+    warn_if_stale
+    echo "  not attached by libvirt; reconciling (needs sudo)"
+    sudo /usr/local/bin/ni-daq-usb attach || echo "  attach failed, see: ni-daq log"
+    sleep 3
     echo "devices: $(devices)"
 }
 
@@ -194,7 +216,7 @@ main() {
         attach)  cmd_attach ;;
         reset)   cmd_reset ;;
         ssh)     exec ssh "$VM" "$@" ;;
-        log)     sudo tail -"${1:-30}" /var/log/ni-daq-usb.log ;;
+        log)     tail -"${1:-30}" /var/log/ni-daq-usb.log ;;
         -h|--help|help)
                  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' \
                      "$(readlink -f "${BASH_SOURCE[0]}")" ;;

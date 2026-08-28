@@ -1,0 +1,10 @@
+# Let `ni-daq attach` reconcile USB passthrough without a password prompt.
+#
+# Only needed for a chassis plugged in while the VM is already running: on a
+# cold `ni-daq up`, libvirt attaches it from the domain XML with no privileges
+# at all. Skip this file if you would rather type a password occasionally.
+#
+# The grant is narrow. /usr/local/bin/ni-daq-usb is root-owned and root-only
+# writable, takes no arguments beyond the two below, and only ever attaches or
+# detaches NI (USB vendor 3923) devices on the ni-daq domain.
+__USER__ ALL=(root) NOPASSWD: /usr/local/bin/ni-daq-usb attach, /usr/local/bin/ni-daq-usb detach
