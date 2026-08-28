@@ -862,3 +862,61 @@ and works for a git install too. Verified both ways:
 
 So the only remaining action is to **cut a nidaqwrapper release** and
 `uv pip install -U nidaqwrapper`. Nothing in this repo needs changing.
+
+---
+
+## Step 14 — manual start/stop, and why autostart was a no-op
+
+The VM had `virsh autostart` set from the start, so it looked like it would
+come up on boot. It did not, and the reason is worth writing down.
+
+Arch enables `libvirtd.socket`, not `libvirtd.service`. Socket activation
+means libvirtd starts on the *first connection*, and guest autostart is
+something the daemon does when it starts — so nothing brings the domain up
+until you happen to run a `virsh` command. The evidence from one boot:
+
+    boot:      2026-08-28 05:44:38
+    libvirtd:  2026-08-28 05:58:26     <- 14 minutes later
+
+`systemctl show libvirtd.service -p TriggeredBy` confirms it: the service is
+reachable only through its sockets, and nothing at boot pulls it in.
+
+The udev rule would not have rescued it either. `host/ni-daq-usb:27` bails out
+before doing anything when the domain is not running:
+
+    [ "$($VIRSH domstate "$VM" 2>/dev/null)" = "running" ] || {
+        echo "domain not running, nothing to do"; exit 0; }
+
+That `virsh` call does socket-activate libvirtd, which then begins autostarting
+the domain — but the script has already read the state and exited. So on a cold
+boot, plugging in the chassis would leave a VM that is booting and a chassis
+that never got attached.
+
+Rather than enable `libvirtd.service`, the VM is now explicitly **not**
+autostarted (`virsh autostart --disable`, and `02-create-vm.sh` no longer sets
+it). It holds ~2 GB of RAM and is only useful with the chassis plugged in, so
+it should be started deliberately.
+
+`host/ni-daq` is that command, symlinked into `~/.local/bin` by
+`setup.sh control`:
+
+| | |
+|---|---|
+| `ni-daq up` | start, wait for the gRPC port, attach the chassis |
+| `ni-daq down` | ACPI shutdown, `destroy` after 60 s |
+| `ni-daq status` | domain, gRPC reachability, device list, chassis on host |
+| `ni-daq attach` | reconcile USB without restarting anything |
+| `ni-daq reset` | restart the gRPC server, clearing orphaned sessions |
+| `ni-daq ssh` / `log` | shell into the guest / tail the USB log |
+
+Two things `up` has to do that are not obvious. It waits on the **gRPC port**,
+not on SSH — the port is what the client actually needs, and it opens a few
+seconds after boot. And it calls `ni-daq-usb attach` itself, because udev only
+fires on USB events: a chassis that was already plugged in when the VM started
+generates no event and would otherwise never be attached.
+
+Measured on this machine: `down` 6 s, `up` 14 s with the gRPC server answering
+4 s after `virsh start`.
+
+Starting from a cold boot needs no special handling — `ni-daq up` runs `virsh`,
+which socket-activates libvirtd on the way through.

@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Start and stop the ni-daq measurement VM by hand.
+#
+# The VM deliberately does NOT autostart: it holds ~2 GB of RAM and is only
+# useful when the NI chassis is plugged in. Bring it up when you want to
+# measure, drop it when you are done.
+#
+#   ni-daq up        start the VM, wait for the gRPC server, attach the chassis
+#   ni-daq down      shut it down cleanly
+#   ni-daq status    what is running, and does the driver see the hardware
+#   ni-daq attach    re-attach the chassis without restarting anything
+#   ni-daq reset     restart the gRPC server (clears orphaned sessions)
+#   ni-daq ssh       shell into the guest, or run a command there
+#   ni-daq log       tail the USB attach log
+set -uo pipefail
+
+VM=ni-daq
+IP=192.168.122.50
+PORT=31763
+VIRSH="virsh -c qemu:///system"
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+VENV="$REPO/.venv/bin/python"
+BOOT_TIMEOUT=90
+STOP_TIMEOUT=60
+
+die() { echo "ni-daq: $*" >&2; exit 1; }
+
+state() { $VIRSH domstate "$VM" 2>/dev/null | head -1; }
+
+stopped() { [ "$(state)" != running ]; }
+
+grpc_up() {
+    # bash's own /dev/tcp -- no netcat dependency.
+    (exec 3<>"/dev/tcp/$IP/$PORT") 2>/dev/null
+}
+
+chassis_on_host() {
+    local d v
+    for d in /sys/bus/usb/devices/*/; do
+        v=$(cat "$d/idVendor" 2>/dev/null) || continue
+        [ "$v" = "3923" ] && return 0
+    done
+    return 1
+}
+
+wait_for() {
+    # wait_for <seconds> <description> <command...>
+    local timeout=$1 what=$2; shift 2
+    local i
+    printf '  waiting for %s' "$what"
+    for ((i = 0; i < timeout; i++)); do
+        if "$@"; then echo " ok (${i}s)"; return 0; fi
+        printf '.'
+        sleep 1
+    done
+    echo " TIMEOUT after ${timeout}s"
+    return 1
+}
+
+devices() {
+    # Ask the driver what it can see. Only possible once the client venv
+    # exists; the port being open does not prove the hardware is there.
+    [ -x "$VENV" ] || { echo "(no client venv -- run ./setup.sh client)"; return; }
+    "$VENV" - "$REPO" <<'PY' 2>/dev/null || echo "(could not reach the driver)"
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "client"))
+import ni_grpc
+print(ni_grpc.devices() or "[] -- server is up but sees no hardware")
+PY
+}
+
+cmd_up() {
+    case "$(state)" in
+        running) echo "already running" ;;
+        "")      die "domain '$VM' does not exist -- run ./setup.sh" ;;
+        *)       echo "starting $VM"
+                 $VIRSH start "$VM" >/dev/null || die "could not start $VM" ;;
+    esac
+
+    wait_for "$BOOT_TIMEOUT" "the gRPC server on $IP:$PORT" grpc_up \
+        || die "the VM booted but the gRPC server never came up -- try: ni-daq ssh 'systemctl status ni-grpc-device'"
+
+    # udev only fires on USB events, so a chassis that was already plugged in
+    # when the VM started is not attached to anything yet. Reconcile now.
+    if chassis_on_host; then
+        echo "  attaching the NI chassis (needs sudo -- the reconcile script logs to /var/log)"
+        sudo /usr/local/bin/ni-daq-usb attach || echo "  attach reported a problem, see: ni-daq log"
+        sleep 2
+    else
+        echo "  no NI chassis on this machine's USB -- plug it in and run: ni-daq attach"
+    fi
+
+    echo "devices: $(devices)"
+}
+
+cmd_down() {
+    [ "$(state)" = "running" ] || { echo "not running"; return; }
+    echo "shutting down $VM"
+    $VIRSH shutdown "$VM" >/dev/null
+    if ! wait_for "$STOP_TIMEOUT" "a clean shutdown" stopped; then
+        echo "  still up after ${STOP_TIMEOUT}s, pulling the plug"
+        $VIRSH destroy "$VM" >/dev/null
+    fi
+}
+
+cmd_status() {
+    local s; s=$(state)
+    printf '%-12s %s\n' "domain" "${s:-does not exist}"
+    [ "$s" = "running" ] || return 0
+
+    if grpc_up; then
+        printf '%-12s reachable on %s:%s\n' "grpc" "$IP" "$PORT"
+        printf '%-12s %s\n' "devices" "$(devices)"
+    else
+        printf '%-12s NOT reachable on %s:%s\n' "grpc" "$IP" "$PORT"
+    fi
+
+    if chassis_on_host; then
+        printf '%-12s present on host USB\n' "chassis"
+    else
+        printf '%-12s not plugged in\n' "chassis"
+    fi
+}
+
+cmd_attach() {
+    [ "$(state)" = "running" ] || die "the VM is not running -- ni-daq up"
+    chassis_on_host || die "no NI device on this machine's USB"
+    sudo /usr/local/bin/ni-daq-usb attach
+    sleep 2
+    echo "devices: $(devices)"
+}
+
+cmd_reset() {
+    [ "$(state)" = "running" ] || die "the VM is not running -- ni-daq up"
+    echo "restarting the gRPC server (drops every open session)"
+    ssh "$VM" 'sudo systemctl restart ni-grpc-device' || die "could not restart it"
+    wait_for 30 "the gRPC server" grpc_up
+    echo "devices: $(devices)"
+}
+
+main() {
+    local cmd=${1:-status}; shift || true
+    case "$cmd" in
+        up)      cmd_up ;;
+        down)    cmd_down ;;
+        status)  cmd_status ;;
+        attach)  cmd_attach ;;
+        reset)   cmd_reset ;;
+        ssh)     exec ssh "$VM" "$@" ;;
+        log)     sudo tail -"${1:-30}" /var/log/ni-daq-usb.log ;;
+        -h|--help|help)
+                 awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' \
+                     "$(readlink -f "${BASH_SOURCE[0]}")" ;;
+        *)       die "unknown command '$cmd' -- try: ni-daq help" ;;
+    esac
+}
+
+main "$@"

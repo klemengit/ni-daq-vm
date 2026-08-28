@@ -38,6 +38,21 @@ Requires: an Arch host with KVM, `uv`, and sudo.
 
 ## Use
 
+The VM does not autostart -- it holds ~2 GB of RAM and is only useful with the
+chassis plugged in. Bring it up when you want to measure:
+
+```bash
+ni-daq up        # start, wait for the gRPC server, attach the chassis
+ni-daq status    # domain, gRPC, and what the driver can see
+ni-daq down      # shut it down cleanly
+```
+
+`ni-daq attach` re-attaches a chassis you plugged in after boot, `ni-daq reset`
+restarts the gRPC server to clear orphaned sessions, and `ni-daq ssh` drops you
+into the guest.
+
+Then, from Python:
+
 ```python
 import sys; sys.path.insert(0, "~/Work/ni-daq-vm/client")
 import LDAQ
@@ -80,7 +95,7 @@ short, so it doubles as a smoke test after a reboot or a replug.
 | Path | What |
 |---|---|
 | `setup.sh` | orchestrator; run this |
-| `host/` | Arch-side: libvirt, VM creation, ufw, USB udev rule |
+| `host/` | Arch-side: libvirt, VM creation, ufw, USB udev rule, the `ni-daq` command |
 | `guest/` | Ubuntu-side: kernel pin, NI-DAQmx, gRPC server |
 | `cloud-init/` | first-boot identity and network config |
 | `client/` | `ni_grpc.py`, the client-side API, and the smoke test `setup.sh` runs |
@@ -96,6 +111,15 @@ short, so it doubles as a smoke test after a reboot or a replug.
 and unattended-upgrades disabled. Verified: all 32 NI DKMS modules build against
 it with NI-DAQmx 2026 Q3, including `nipalk`, which fails on 6.14 with older
 releases.
+
+**`virsh autostart` alone does not survive a reboot.** Arch enables only
+`libvirtd.socket`, not `libvirtd.service`, so libvirt starts on the first
+connection rather than at boot -- and guest autostart is something the daemon
+does when *it* starts. Marking the domain autostart therefore does nothing
+until you happen to run a `virsh` command. This repo does not rely on it: the
+domain is explicitly *not* autostarted and `ni-daq up` starts it on demand,
+which socket-activates libvirt on the way. If you ever do want it at boot, it
+needs `systemctl enable libvirtd.service`, not just the autostart flag.
 
 **ufw silently eats the guest's DHCP.** Omarchy enables ufw with default-deny
 incoming. The guest's DHCP broadcast to UDP/67 arrives on `virbr0` and is dropped

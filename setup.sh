@@ -22,7 +22,7 @@ KVER=6.14.0-37          # lowest kernel >= NI's 6.11 minimum for Ubuntu 24.04
 NI_RELEASE=2026Q3
 GRPC_VER=v2.19.0
 
-STAGES=(host-deps ufw image vm guest udev client verify)
+STAGES=(host-deps ufw image vm guest udev control client verify)
 
 say()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 ssh_vm() { ssh -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -116,6 +116,16 @@ stage_guest() {
 stage_udev() {
     say "USB passthrough that survives the chassis changing its product id"
     ./host/04-install-udev-rule.sh
+}
+
+stage_control() {
+    say "The ni-daq control command"
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$PWD/host/ni-daq" "$HOME/.local/bin/ni-daq"
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) echo "    ni-daq -> $HOME/.local/bin/ni-daq" ;;
+        *) echo "    installed, but $HOME/.local/bin is not on your PATH" ;;
+    esac
 }
 
 stage_client() {

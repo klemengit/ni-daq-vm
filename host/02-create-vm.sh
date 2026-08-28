@@ -57,7 +57,9 @@ sudo virt-install \
     --noautoconsole
 
 echo "==> Autostart at boot"
-sudo virsh autostart "$VM"
+# Deliberately NOT autostarted: the VM holds ~2 GB of RAM and is only useful
+# with the chassis plugged in. Bring it up with `ni-daq up` when measuring.
+sudo virsh autostart --disable "$VM" 2>/dev/null || true
 
 echo
 echo "==> Waiting for SSH on $IP (cloud-init takes ~60-90 s on first boot)"
