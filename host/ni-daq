@@ -125,7 +125,8 @@ cmd_status() {
 cmd_attach() {
     [ "$(state)" = "running" ] || die "the VM is not running -- ni-daq up"
     chassis_on_host || die "no NI device on this machine's USB"
-    sudo /usr/local/bin/ni-daq-usb attach
+    # Needs root: the reconcile script logs to /var/log and locks in /run.
+    sudo /usr/local/bin/ni-daq-usb attach || die "attach failed, see: ni-daq log"
     sleep 2
     echo "devices: $(devices)"
 }
