@@ -69,6 +69,20 @@ print(ni_grpc.devices() or "[] -- server is up but sees no hardware")
 PY
 }
 
+usb_script_stale() {
+    # The reconcile script is installed to /usr/local/bin, so a fix that
+    # lands in the repo does nothing until `setup.sh udev` is re-run. That
+    # failure is silent and looks exactly like a hardware fault, so say so.
+    [ -r /usr/local/bin/ni-daq-usb ] || return 0
+    ! cmp -s "$REPO/host/ni-daq-usb" /usr/local/bin/ni-daq-usb
+}
+
+warn_if_stale() {
+    usb_script_stale || return 0
+    echo "  NOTE: /usr/local/bin/ni-daq-usb differs from host/ni-daq-usb." >&2
+    echo "        Re-install it with: ./setup.sh udev" >&2
+}
+
 cmd_up() {
     case "$(state)" in
         running) echo "already running" ;;
@@ -82,6 +96,7 @@ cmd_up() {
 
     # udev only fires on USB events, so a chassis that was already plugged in
     # when the VM started is not attached to anything yet. Reconcile now.
+    warn_if_stale
     if chassis_on_host; then
         echo "  attaching the NI chassis (needs sudo -- the reconcile script logs to /var/log)"
         sudo /usr/local/bin/ni-daq-usb attach || echo "  attach reported a problem, see: ni-daq log"
@@ -120,11 +135,16 @@ cmd_status() {
     else
         printf '%-12s not plugged in\n' "chassis"
     fi
+
+    if usb_script_stale; then
+        printf '%-12s /usr/local/bin/ni-daq-usb is stale -- ./setup.sh udev\n' "warning"
+    fi
 }
 
 cmd_attach() {
     [ "$(state)" = "running" ] || die "the VM is not running -- ni-daq up"
     chassis_on_host || die "no NI device on this machine's USB"
+    warn_if_stale
     # Needs root: the reconcile script logs to /var/log and locks in /run.
     sudo /usr/local/bin/ni-daq-usb attach || die "attach failed, see: ni-daq log"
     sleep 2
