@@ -28,3 +28,16 @@ dkms status || true
 
 echo "==> Kernel modules built for $(uname -r)"
 find /lib/modules/"$(uname -r)"/updates/dkms -name "ni*" 2>/dev/null | head -20 || echo "    none found"
+
+echo "==> Capping nidrum's stop timeout"
+# nidrum (NI's user-mode driver service) ignores SIGTERM and is SIGKILLed
+# after systemd's default 90 s stop timeout. With the chassis attached that
+# timeout IS the shutdown: measured 97 s, against 6 s with no NI hardware.
+# The kill happens either way, so there is nothing to gain by waiting for it.
+sudo mkdir -p /etc/systemd/system/nidrum.service.d
+sudo tee /etc/systemd/system/nidrum.service.d/stop-timeout.conf >/dev/null <<'CONF'
+[Service]
+TimeoutStopSec=5
+CONF
+sudo systemctl daemon-reload
+echo "    nidrum TimeoutStopSec=$(systemctl show nidrum.service -p TimeoutStopUSec --value)"

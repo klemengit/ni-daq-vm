@@ -69,6 +69,13 @@ print(ni_grpc.devices() or "[] -- server is up but sees no hardware")
 PY
 }
 
+qemu_pid() {
+    # The QEMU process libvirt started for this domain, if any. Matching on
+    # "guest=<vm>," rather than the domain name alone keeps this from picking
+    # up the shell that happens to mention it.
+    pgrep -f "qemu-system-[^ ]* -name guest=$VM," 2>/dev/null | head -1
+}
+
 usb_script_stale() {
     # The reconcile script is installed to /usr/local/bin, so a fix that
     # lands in the repo does nothing until `setup.sh udev` is re-run. That
@@ -119,9 +126,28 @@ cmd_down() {
 }
 
 cmd_status() {
-    local s; s=$(state)
+    local s pid; s=$(state); pid=$(qemu_pid)
     printf '%-12s %s\n' "domain" "${s:-does not exist}"
-    [ "$s" = "running" ] || return 0
+
+    if [ "$s" != "running" ]; then
+        # Say what "down" actually means, rather than asking for trust in one
+        # word: no QEMU process, and nothing answering on the port.
+        if [ -n "$pid" ]; then
+            printf '%-12s WARNING: qemu still alive as pid %s\n' "process" "$pid"
+        else
+            printf '%-12s no qemu process -- its RAM is back\n' "process" 
+        fi
+        grpc_up && printf '%-12s something is STILL answering on %s:%s\n' \
+            "grpc" "$IP" "$PORT" \
+            || printf '%-12s nothing on %s:%s\n' "grpc" "$IP" "$PORT"
+        return 0
+    fi
+
+    if [ -n "$pid" ]; then
+        printf '%-12s pid %s, %s MB resident, up %s\n' "process" "$pid" \
+            "$(( $(ps -o rss= -p "$pid" 2>/dev/null || echo 0) / 1024 ))" \
+            "$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+    fi
 
     if grpc_up; then
         printf '%-12s reachable on %s:%s\n' "grpc" "$IP" "$PORT"

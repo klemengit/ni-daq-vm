@@ -920,3 +920,53 @@ Measured on this machine: `down` 6 s, `up` 14 s with the gRPC server answering
 
 Starting from a cold boot needs no special handling — `ni-daq up` runs `virsh`,
 which socket-activates libvirtd on the way through.
+
+---
+
+## Step 15 — "is it actually down?", and a 97-second shutdown
+
+`ni-daq status` reporting `shut off` is libvirt's own view and is authoritative,
+but one word is a thin thing to trust. Status now prints the evidence instead:
+
+    domain       shut off
+    process      no qemu process -- its RAM is back
+    grpc         nothing on 192.168.122.50:31763
+
+and, while running, the pid, resident size and uptime of the QEMU process.
+The process is matched on `qemu-system-* -name guest=ni-daq,` rather than the
+domain name alone, so a shell that merely mentions `ni-daq` is not mistaken
+for the VM.
+
+Adding that turned up a real problem. Shutdown times, measured:
+
+| chassis | shutdown |
+|---|---|
+| not plugged in | 6 s |
+| plugged in, not attached to the VM | 26 s |
+| attached and in use | **97 s** |
+
+`ni-daq down` gives ACPI 60 s and then calls `virsh destroy`, so the third
+case was being hard-powered-off every time — a hard cut on a filesystem that
+had NI kernel modules loaded.
+
+The guest's own journal from the previous boot named the culprit in one line:
+
+    nidrum.service: State 'stop-sigterm' timed out. Killing.
+    nidrum.service: Killing process 904 (nidrum) with signal SIGKILL.
+    nidrum.service: Failed with result 'timeout'.
+
+`nidrum` is NI's user-mode driver service. It ignores SIGTERM, so systemd
+waits out its default `TimeoutStopSec` (90 s on Ubuntu) and then SIGKILLs it.
+That timeout *was* the shutdown.
+
+The kill is the outcome either way, so there is nothing to be gained by
+waiting for it. A drop-in caps the wait:
+
+    # /etc/systemd/system/nidrum.service.d/stop-timeout.conf
+    [Service]
+    TimeoutStopSec=5
+
+**97 s -> 12 s**, with the chassis still attached and all three devices live
+right up to the shutdown. `guest/02-nidaqmx.sh` now installs the drop-in, so a
+fresh build gets it. The 60 s fallback in `ni-daq down` stays as a safety net;
+it should no longer ever fire.
