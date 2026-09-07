@@ -189,13 +189,51 @@ def ldaq_ai_task(
     return AITask.from_task(raw, take_ownership=True)
 
 
-def restart_server(host: str = "ni-daq") -> None:
-    """Clear orphaned sessions on the gRPC server.
+def release(server: str = SERVER, timeout: float = 20.0) -> None:
+    """Drop every session the gRPC server holds.
 
-    A script that dies without closing its task leaves the session alive on the
-    server, still holding the hardware. The next run then fails with -50103
-    ("resource is reserved") or silently attaches to the stale session. Restarting
-    the service drops every session.
+    A script that dies without closing its task leaves the session alive on
+    the server, still holding the hardware. The next run then fails with
+    -50103 ("resource is reserved") or -200489 ("channel already in task"),
+    or silently attaches to the stale session. There is no client-side call
+    that reaches a session whose client is already gone, so the server is
+    asked to reset itself.
+
+    Uses the device server's own ``ResetServer`` call, so it needs no ssh, no
+    sudo and no systemd -- unlike :func:`restart_server`, it works from any
+    machine that can reach the port, Windows included.
+
+    Blunt by design: it drops sessions belonging to every client, not only
+    this one. Fine while a single station owns the server.
+
+    Raises
+    ------
+    RuntimeError
+        If the server declines the reset.
+    grpc.RpcError
+        If the server cannot be reached.
+    """
+    import session_pb2
+    import session_pb2_grpc
+
+    stub = session_pb2_grpc.SessionUtilitiesStub(channel(server))
+    reply = stub.ResetServer(session_pb2.ResetServerRequest(), timeout=timeout)
+    if not reply.is_server_reset:
+        raise RuntimeError("the gRPC server declined the reset")
+
+    # Every session opened on the old channel is gone; drop it so the next
+    # call opens a fresh one rather than reusing sessions that no longer exist.
+    global _channel
+    _channel = None
+
+
+def restart_server(host: str = "ni-daq") -> None:
+    """Restart the gRPC service over ssh.
+
+    The heavy-handed alternative to :func:`release`: it replaces the process
+    rather than asking it to reset, so it is what to reach for when the
+    server itself is wedged and no longer answers RPCs. Needs ssh and sudo on
+    the guest. Prefer :func:`release` otherwise.
     """
     import subprocess
 

@@ -9,7 +9,8 @@
 #   ni-daq down      shut it down cleanly
 #   ni-daq status    what is running, and does the driver see the hardware
 #   ni-daq attach    re-attach the chassis without restarting anything
-#   ni-daq reset     restart the gRPC server (clears orphaned sessions)
+#   ni-daq release   drop orphaned gRPC sessions that still hold the hardware
+#   ni-daq reset     restart the gRPC server (heavier; use if it stops answering)
 #   ni-daq ssh       shell into the guest, or run a command there
 #   ni-daq log       tail the USB attach log
 set -uo pipefail
@@ -199,6 +200,88 @@ cmd_attach() {
     echo "devices: $(devices)"
 }
 
+cmd_release() {
+    # A task whose client died keeps its session, and the hardware, on the
+    # server. Ask the server to reset itself: no ssh, no sudo, and it leaves
+    # the service -- and the VM's boot state -- alone.
+    [ "$(state)" = "running" ] || die "the VM is not running -- ni-daq up"
+    grpc_up || die "nothing answering on $IP:$PORT -- try: ni-daq reset"
+    [ -x "$VENV" ] || die "no client venv -- run ./setup.sh client"
+    echo "releasing every gRPC session on $IP:$PORT"
+    "$VENV" - "$REPO" <<'PY' || die "the server would not release its sessions -- try: ni-daq reset"
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "client"))
+import ni_grpc
+
+ni_grpc.release()
+PY
+    # Enumeration alone does not prove a session let go -- a reserved device
+    # still lists. Opening a task does.
+    echo "devices: $(devices)"
+    claim_check
+}
+
+claim_check() {
+    # Try to open a one-channel task. A reserved device still enumerates, so
+    # listing devices proves nothing -- only claiming one does.
+    "$VENV" - "$REPO" <<'PY'
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "client"))
+import ni_grpc
+from nidaqmx.constants import AcquisitionType, TaskMode
+from nidaqmx.errors import DaqError
+
+# The hardware is still held by an earlier session.
+RESERVED = {-50103, -200489, -50405}
+
+# The chassis itself carries no channels, and a bridge module rejects a
+# voltage channel for reasons that have nothing to do with reservation, so
+# walk the channels until one accepts the task or one says it is held.
+#
+# A delta-sigma module also refuses to reserve without a sample clock, and
+# only rates on its own grid are valid, so each candidate carries its
+# device's stated maximum -- the one rate always safe to ask for.
+candidates = [
+    (c.name, d.ai_max_single_chan_rate)
+    for d in ni_grpc.system().devices
+    for c in d.ai_physical_chans
+]
+if not candidates:
+    print("claim   : skipped -- no analog input on this chassis")
+    raise SystemExit(0)
+
+unsupported = []
+for name, rate in candidates:
+    try:
+        with ni_grpc.remote_task("ni_daq_claim_check") as task:
+            task.ai_channels.add_ai_voltage_chan(name)
+            task.timing.cfg_samp_clk_timing(
+                rate=rate,
+                sample_mode=AcquisitionType.FINITE,
+                samps_per_chan=1000,
+            )
+            # Adding a channel does not touch the hardware -- two tasks can
+            # name the same input quite happily. Reserving is what claims it,
+            # and therefore what an orphaned session refuses.
+            task.control(TaskMode.TASK_RESERVE)
+    except DaqError as exc:
+        if exc.error_code in RESERVED:
+            print(f"claim   : FAILED -- {name} is still held ({exc.error_code})")
+            raise SystemExit(1)
+        unsupported.append(name)
+        continue
+    print(f"claim   : ok -- {name} is free")
+    raise SystemExit(0)
+
+print(f"claim   : inconclusive -- none of the {len(unsupported)} channels took "
+      f"a voltage task, and none reported being held")
+PY
+}
+
 cmd_reset() {
     [ "$(state)" = "running" ] || die "the VM is not running -- ni-daq up"
     echo "restarting the gRPC server (drops every open session)"
@@ -214,6 +297,7 @@ main() {
         down)    cmd_down ;;
         status)  cmd_status ;;
         attach)  cmd_attach ;;
+        release) cmd_release ;;
         reset)   cmd_reset ;;
         ssh)     exec ssh "$VM" "$@" ;;
         log)     tail -"${1:-30}" /var/log/ni-daq-usb.log ;;

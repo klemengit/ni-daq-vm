@@ -50,9 +50,10 @@ ni-daq status    # domain, gRPC, and what the driver can see
 ni-daq down      # shut it down cleanly
 ```
 
-`ni-daq attach` re-attaches a chassis you plugged in after boot, `ni-daq reset`
-restarts the gRPC server to clear orphaned sessions, and `ni-daq ssh` drops you
-into the guest.
+`ni-daq attach` re-attaches a chassis you plugged in after boot,
+`ni-daq release` drops orphaned gRPC sessions that still hold the hardware, and
+`ni-daq ssh` drops you into the guest. `ni-daq reset` restarts the whole gRPC
+service -- the heavier fallback for when the server stops answering.
 
 Then, from Python:
 
@@ -79,7 +80,9 @@ with remote_task("quick") as task:
     data = task.read(number_of_samples_per_channel=2560)
 ```
 
-`ni_grpc.restart_server()` clears orphaned sessions after a crashed script.
+`ni_grpc.release()` clears orphaned sessions after a crashed script, over the
+server's own reset call -- no ssh or sudo, so it works from anywhere that can
+reach the port.
 
 ### See it work
 
@@ -147,8 +150,14 @@ re-attach.
 
 **Orphaned gRPC sessions hold the hardware.** A script that dies without closing
 its task leaves the session alive on the server. The next run fails with `-50103`
-(resource reserved) or `-200489` (channel already in task). Use
-`ni_grpc.restart_server()`.
+(resource reserved) or `-200489` (channel already in task). Run `ni-daq release`,
+or call `ni_grpc.release()`.
+
+Note what "holds" means: only a task that was *reserved or started* claims the
+hardware. A session that merely added channels blocks nothing, so two tasks can
+name the same input without complaint. `ni-daq release` checks by reserving,
+which is why it can tell a free chassis from a held one where listing devices
+cannot -- a reserved device still enumerates.
 
 **No simulated devices on Linux.** Those are a NI MAX feature and MAX is
 Windows-only. Without hardware, the correct "it all works" signal is DAQmx
