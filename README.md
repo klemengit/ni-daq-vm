@@ -45,15 +45,21 @@ The VM does not autostart -- it holds ~2 GB of RAM and is only useful with the
 chassis plugged in. Bring it up when you want to measure:
 
 ```bash
-ni-daq up        # start, wait for the gRPC server, attach the chassis
-ni-daq status    # domain, gRPC, and what the driver can see
-ni-daq down      # shut it down cleanly
+ni-daq up        # when you want to measure
+ni-daq down      # when you are done
 ```
 
-`ni-daq attach` re-attaches a chassis you plugged in after boot,
-`ni-daq release` drops orphaned gRPC sessions that still hold the hardware, and
-`ni-daq ssh` drops you into the guest. `ni-daq reset` restarts the whole gRPC
-service -- the heavier fallback for when the server stops answering.
+| Command | What it does | Needs root? |
+|---|---|---|
+| `ni-daq up` | Starts the domain, waits for the gRPC server, waits for the driver to report devices. Falls back to the privileged reconcile only if libvirt did not attach the chassis itself. | no, on a cold start |
+| `ni-daq down` | Clean `virsh shutdown`, with a `destroy` only after 60 s. | no |
+| `ni-daq status` | Domain state, QEMU pid and resident RAM, gRPC reachability, visible devices, whether the chassis is on host USB, and a warning if the installed `ni-daq-usb` has drifted from the repo. This is the default — a bare `ni-daq` runs it. | no |
+| `ni-daq attach` | Reconciles the domain against whatever NI device is physically plugged in. For a chassis connected after the VM was already up. | sudo, on exactly `ni-daq-usb attach` |
+| `ni-daq release` | Asks the server to drop every gRPC session, then proves the hardware is actually free by reserving a channel — listing devices cannot tell a reserved chassis from a free one. | no |
+| `ni-daq reset` | Restarts `ni-grpc-device` in the guest. The heavier fallback for when the server stops answering; drops every open session. | sudo in the guest, over ssh |
+| `ni-daq ssh [cmd]` | Shell into the guest, or run one command there. | no |
+| `ni-daq log [n]` | Tails the last `n` (default 30) lines of `/var/log/ni-daq-usb.log`, the USB attach log. | no |
+| `ni-daq help` | Prints the command list from the script's own header. | no |
 
 Then, from Python:
 
