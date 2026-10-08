@@ -175,6 +175,13 @@ an empty array locally but raises `DaqError -52005` over gRPC, about once every
 sixty reads in an acquisition loop. `ni_grpc` patches `AITask.acquire` at runtime;
 fixed upstream in [ladisk/nidaqwrapper#9](https://github.com/ladisk/nidaqwrapper/pull/9) (merged, not yet released). `ni_grpc` patches `AITask.acquire` at runtime and self-disables once the fix is installed.
 
+**Every `nidaqmx` object needs `grpc_options`, not just `Task`.** Anything
+created without it silently falls back to a local driver and dies with
+`DaqNotFoundError`. LDAQ's `NITask.add_channel(scale=...)` does exactly this via
+`Scale.create_lin_scale(...)`. `patch_legacy_local()` therefore defaults
+`grpc_options` on `System.local()`, `Task` and every `Scale.create_*` factory; if
+another class turns up with the same error, add it there.
+
 ## Performance
 
 Each DAQmx call is an RPC over the host-only NAT, so latency is sub-millisecond

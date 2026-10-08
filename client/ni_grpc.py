@@ -126,6 +126,98 @@ def _patch_acquire_for_grpc() -> None:
     AITask.acquire = acquire
 
 
+def patch_legacy_local(server: str = SERVER) -> None:
+    """Route ``nidaqmx.system.System.local()`` and bare ``nidaqmx.Task(...)`` to the VM.
+
+    For code written against LDAQ <1.3 (before ``NITask``/``NITaskOutput`` were
+    renamed ``AITask``/``AOTask`` and split out into ``nidaqwrapper``), which
+    hardcodes ``nidaqmx.system.System.local()`` and
+    ``nidaqmx.task.Task(new_task_name=...)`` with no ``grpc_options`` hook. This
+    patches both at the ``nidaqmx`` module level so that code keeps working
+    completely unmodified, against the VM instead of a local driver.
+
+    Idempotent -- safe to call more than once.
+    """
+    import nidaqmx.system
+    import nidaqmx.task
+
+    if getattr(nidaqmx.system.System.local, "_grpc_patched", False):
+        return
+
+    def local():
+        return system(server)
+
+    local._grpc_patched = True
+    nidaqmx.system.System.local = staticmethod(local)
+
+    _OriginalTask = nidaqmx.task.Task
+
+    class _GrpcTask(_OriginalTask):
+        def __init__(self, new_task_name="", **kwargs):
+            kwargs.setdefault("grpc_options", options(new_task_name, server))
+            super().__init__(new_task_name=new_task_name, **kwargs)
+
+    nidaqmx.task.Task = _GrpcTask
+    nidaqmx.Task = _GrpcTask
+
+    # LDAQ's NITask.add_channel(scale=...) calls Scale.create_lin_scale(...)
+    # with no grpc_options, which would fall back to a (missing) local driver.
+    # Default every Scale.create_* factory to the VM.
+    import functools
+    from nidaqmx.scale import Scale
+
+    for _name in [n for n in vars(Scale) if n.startswith("create_")]:
+        _orig = getattr(Scale, _name)
+
+        def _make(orig):
+            @functools.wraps(orig)
+            def create(*args, grpc_options=None, **kwargs):
+                if grpc_options is None:
+                    grpc_options = options("", server)
+                return orig(*args, grpc_options=grpc_options, **kwargs)
+            return staticmethod(create)
+
+        setattr(Scale, _name, _make(_orig))
+
+
+def patch_legacy_acquire() -> None:
+    """Make LDAQ <1.3's ``NITask.acquire_base()`` tolerate an empty buffer over gRPC.
+
+    Same bug as :func:`_patch_acquire_for_grpc`, in the code
+    ``nidaqwrapper.AITask.acquire`` was extracted from:
+    ``NITask.acquire_base()`` reads with
+    ``number_of_samples_per_channel=READ_ALL_AVAILABLE``, which raises
+    ``DaqError -52005`` over gRPC on an empty buffer instead of returning an
+    empty array. Requires :func:`patch_legacy_local` to be reaching the VM at
+    all; call both.
+
+    Idempotent -- safe to call more than once. No-op if LDAQ <1.3 is not
+    installed (nothing to patch).
+    """
+    try:
+        from LDAQ.national_instruments.ni_task import NITask
+    except ImportError:
+        return
+
+    if getattr(NITask.acquire_base, "_grpc_patched", False):
+        return
+
+    original = NITask.acquire_base
+
+    def acquire_base(self):
+        try:
+            return original(self)
+        except DaqError as exc:
+            if exc.error_code == -52005:
+                # Mirror what a local driver returns for an empty buffer.
+                return np.array([])
+            raise
+
+    acquire_base._grpc_patched = True
+    acquire_base.__doc__ = original.__doc__
+    NITask.acquire_base = acquire_base
+
+
 def ldaq_ai_task(
     task_name: str,
     sample_rate: float,

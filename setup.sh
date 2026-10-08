@@ -37,7 +37,7 @@ wait_for_ssh() {
     local i
     for i in $(seq 1 90); do
         ssh_vm -o ConnectTimeout=4 true 2>/dev/null && { echo "    up"; return 0; }
-        printf '.'; ping -c1 -W3 "$IP" >/dev/null 2>&1
+        printf '.'; ping -c1 -W3 "$IP" >/dev/null 2>&1 || true
     done
     echo; echo "    timed out. Try: sudo virsh console $VM (password in .console-password)"
     return 1
