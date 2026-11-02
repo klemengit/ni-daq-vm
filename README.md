@@ -1,5 +1,16 @@
 # ni-daq-vm
 
+> **Moved.** This project now lives in
+> [ladisk/ni-daqmx-arch](https://github.com/ladisk/ni-daqmx-arch), under
+> [`vm/`](https://github.com/ladisk/ni-daqmx-arch/tree/main/vm), next to a
+> native NI-DAQmx install for Arch. The history came along. Set it up with:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/ladisk/ni-daqmx-arch/main/install.sh | bash -s vm
+> ```
+>
+> This repository is archived and no longer updated.
+
 Run National Instruments DAQ hardware from a Linux distribution NI does not
 support, by giving the driver its own kernel.
 
